@@ -96,12 +96,15 @@ def send_report(args):
 
     response = post_data_to_endpoint(endpoint, form_dict)
 
-    clear_tasks(config.get('telepath', 'status_filename'))
+    if response.status_code == 200:
+        clear_tasks(config.get('telepath', 'status_filename'))
+        if args.verbose:
+            print(''.join(["Cleared tasks in ",
+                           config.get('telepath', 'status_filename')]))
 
     if args.verbose:
         print(''.join(["Returned ", str(response.status_code),
                        " status code."]))
-        print("Cleared tasks in " + config.get('telepath', 'status_filename'))
 
 
 def post_data_to_endpoint(endpoint, payload):
