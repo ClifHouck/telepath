@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 
 # TODO(ClifHouck) Load options through a configuration file.
-# - standup endpoint
-# - irc nick
 # - functional area?
-# - file to store task/wot/impediments in?
 # TODO(ClifHouck) Support command-line addition of a completed task.
 # TODO(ClifHouck) Send completed task to standup endpoint.
 # TODO(ClifHouck) be able to generate a crontab entry to send status, on a
 # weekday, at a specified time
 
+import argparse
+import io
+import os
+
+import requests
 from six.moves import configparser
 
-config_filename = "telepath.cfg"
+CONFIG_FILENAME = "telepath.cfg"
 
 
 class BadConfigurationError(Exception):
@@ -46,5 +48,92 @@ def get_configuration(filename):
         raise BadConfigurationError(reason)
     return config
 
+
+def add_completed_task(status_filename, task_body):
+    with open(status_filename, 'a') as outfile:
+        outfile.seek(io.SEEK_END)
+        outfile.write(task_body + "\n")
+
+
+def task_complete(args):
+    config = get_configuration(args.config_file)
+
+    status_file = config.get('telepath', 'status_filename')
+
+    add_completed_task(status_file, args.task_body)
+
+    if args.verbose:
+        print(("Added completed task to " +
+              config.get('telepath', 'status_filename')))
+
+
+def get_completed_tasks(status_filename):
+    with open(status_filename, 'r') as infile:
+        return infile.read()
+
+
+def clear_tasks(status_filename):
+    os.remove(status_filename)
+
+
+def send_report(args):
+    config = get_configuration(args.config_file)
+    endpoint = config.get('telepath', 'endpoint')
+
+    completed_tasks = get_completed_tasks(
+        config.get('telepath', 'status_filename'))
+
+    form_dict = {
+        'irc_nick': config.get('telepath', 'irc_nick'),
+        'area': '',
+        'completed': completed_tasks,
+        'inprogress': '',
+        'impediments': '',
+    }
+
+    if args.verbose:
+        print("Posting status to " + endpoint)
+
+    response = post_data_to_endpoint(endpoint, form_dict)
+
+    # clear_tasks(config.get('telepath', 'status_filename'))
+
+    if args.verbose:
+        print(''.join(["Returned ", str(response.status_code),
+                       " status code."]))
+        # print("Cleared tasks in " + config.get('telepath', 'status_filename')
+
+
+def post_data_to_endpoint(endpoint, payload):
+    response = requests.post(endpoint + '/irc', data=payload, verify=False)
+    return response
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Automate standup reporting.")
+    parser.add_argument('-c', '--config-file', default=CONFIG_FILENAME,
+                        help="The configuration file to use with telepath.")
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help="Show more detailed information on progress.")
+
+    subparsers = parser.add_subparsers(help='sub-command help')
+
+    # Completed task parser.
+    complete_task_parser = subparsers.add_parser('task-complete',
+                                                 help='Add a completed task.')
+    complete_task_parser.add_argument('task_body')
+    complete_task_parser.set_defaults(func=task_complete)
+
+    # Send report parser.
+    report_send_parser = subparsers.add_parser('report',
+                                               help='Send the current report.')
+    report_send_parser.set_defaults(func=send_report)
+
+    args = parser.parse_args()
+    print(args)
+    args.func(args)
+
+
 if __name__ == "__main__":
-    config = get_configuration(config_filename)
+    main()
