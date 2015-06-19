@@ -20,6 +20,21 @@ class BadConfigurationError(Exception):
 
 
 def validate_configuration(config):
+    if not config.has_section('telepath'):
+        return (False, "No telepath section.")
+
+    REQUIRED_OPTIONS = ['endpoint', 'irc_nick', 'status_filename']
+    present_options = config.options('telepath')
+    missing = []
+    for option in REQUIRED_OPTIONS:
+        if option not in present_options:
+            missing.append(option)
+
+    if len(missing) > 0:
+        return (False, "The configuration is missing the following required "
+                       "options: %(missing_options)s" % {
+                           'missing_options': missing})
+
     return (True, "Good configuration.")
 
 
