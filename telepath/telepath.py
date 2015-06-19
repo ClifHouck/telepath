@@ -1,12 +1,5 @@
 # -*- coding: utf-8 -*-
 
-# TODO(ClifHouck) Load options through a configuration file.
-# - functional area?
-# TODO(ClifHouck) Support command-line addition of a completed task.
-# TODO(ClifHouck) Send completed task to standup endpoint.
-# TODO(ClifHouck) be able to generate a crontab entry to send status, on a
-# weekday, at a specified time
-
 import argparse
 import io
 import os
@@ -14,7 +7,7 @@ import os
 import requests
 from six.moves import configparser
 
-CONFIG_FILENAME = "telepath.cfg"
+CONFIG_FILENAME = os.path.expanduser("~/.telepath.cfg")
 
 
 class BadConfigurationError(Exception):
@@ -23,7 +16,8 @@ class BadConfigurationError(Exception):
 
 def validate_configuration(config):
     if not config.has_section('telepath'):
-        return (False, "No telepath section.")
+        return (False, "No telepath section. Are you sure the configuration "
+                       "file exists?")
 
     REQUIRED_OPTIONS = ['endpoint', 'irc_nick', 'status_filename']
     present_options = config.options('telepath')
@@ -46,6 +40,12 @@ def get_configuration(filename):
     is_config_good, reason = validate_configuration(config)
     if not is_config_good:
         raise BadConfigurationError(reason)
+
+    # Do expansion on the status_filename option.
+    status_filename = os.path.expanduser(
+        config.get('telepath', 'status_filename'))
+    config.set('telepath', 'status_filename', status_filename)
+
     return config
 
 
@@ -96,12 +96,15 @@ def send_report(args):
 
     response = post_data_to_endpoint(endpoint, form_dict)
 
-    # clear_tasks(config.get('telepath', 'status_filename'))
+    if response.status_code == 200:
+        clear_tasks(config.get('telepath', 'status_filename'))
+        if args.verbose:
+            print(''.join(["Cleared tasks in ",
+                           config.get('telepath', 'status_filename')]))
 
     if args.verbose:
         print(''.join(["Returned ", str(response.status_code),
                        " status code."]))
-        # print("Cleared tasks in " + config.get('telepath', 'status_filename')
 
 
 def post_data_to_endpoint(endpoint, payload):
@@ -131,7 +134,10 @@ def main():
     report_send_parser.set_defaults(func=send_report)
 
     args = parser.parse_args()
-    print(args)
+
+    if args.verbose:
+        print(''.join(["Loading configuration from ", args.config_file]))
+
     args.func(args)
 
 
