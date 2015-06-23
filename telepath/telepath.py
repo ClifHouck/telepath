@@ -2,12 +2,13 @@
 
 import argparse
 import io
+import logging
 import os
 
 import requests
 from six.moves import configparser
 
-CONFIG_FILENAME = os.path.expanduser("~/.telepath.cfg")
+DEFAULT_CONFIG_FILENAME = os.path.expanduser("~/.telepath.cfg")
 
 
 class BadConfigurationError(Exception):
@@ -55,33 +56,43 @@ def add_completed_task(status_filename, task_body):
         outfile.write(task_body + "\n")
 
 
-def task_complete(args):
-    config = get_configuration(args.config_file)
-
+def task_complete(args, config):
     status_file = config.get('telepath', 'status_filename')
 
     add_completed_task(status_file, args.task_body)
 
-    if args.verbose:
-        print(("Added completed task to " +
-              config.get('telepath', 'status_filename')))
+    logging.info(''.join(["Added completed task to ",
+                          config.get('telepath', 'status_filename')]))
 
 
 def get_completed_tasks(status_filename):
-    with open(status_filename, 'r') as infile:
-        return infile.read()
+    try:
+        infile = open(status_filename, 'r')
+    except IOError as e:
+        logging.error("Could not open specified telepath status file "
+                      "'%(file)s': %(reason)s" % {'file': status_filename,
+                                                  'reason': e.strerror})
+        return ''
+
+    content = infile.read()
+    return content
 
 
 def clear_tasks(status_filename):
+    logging.info("Clearing completed tasks by removing the status file "
+                 "'%(filename)s'" % {'filename': status_filename})
     os.remove(status_filename)
 
 
-def send_report(args):
-    config = get_configuration(args.config_file)
+def send_report(args, config):
     endpoint = config.get('telepath', 'endpoint')
 
     completed_tasks = get_completed_tasks(
         config.get('telepath', 'status_filename'))
+
+    if len(completed_tasks) == 0:
+        logging.warning('Refusing to send report with no completed tasks.')
+        return
 
     form_dict = {
         'irc_nick': config.get('telepath', 'irc_nick'),
@@ -91,20 +102,17 @@ def send_report(args):
         'impediments': '',
     }
 
-    if args.verbose:
-        print("Posting status to " + endpoint)
+    logging.info("Posting status to " + endpoint)
 
     response = post_data_to_endpoint(endpoint, form_dict)
 
     if response.status_code == 200:
         clear_tasks(config.get('telepath', 'status_filename'))
-        if args.verbose:
-            print(''.join(["Cleared tasks in ",
-                           config.get('telepath', 'status_filename')]))
+        logging.info(''.join(["Cleared tasks in ",
+                              config.get('telepath', 'status_filename')]))
 
-    if args.verbose:
-        print(''.join(["Returned ", str(response.status_code),
-                       " status code."]))
+    logging.info(''.join(["Returned ", str(response.status_code),
+                          " status code."]))
 
 
 def post_data_to_endpoint(endpoint, payload):
@@ -115,7 +123,7 @@ def post_data_to_endpoint(endpoint, payload):
 def main():
     parser = argparse.ArgumentParser(
         description="Automate standup reporting.")
-    parser.add_argument('-c', '--config-file', default=CONFIG_FILENAME,
+    parser.add_argument('-c', '--config-file', default=DEFAULT_CONFIG_FILENAME,
                         help="The configuration file to use with telepath.")
     parser.add_argument('-v', '--verbose', action='store_true',
                         help="Show more detailed information on progress.")
@@ -135,10 +143,26 @@ def main():
 
     args = parser.parse_args()
 
+    log_level = logging.WARNING
     if args.verbose:
-        print(''.join(["Loading configuration from ", args.config_file]))
+        log_level = logging.DEBUG
 
-    args.func(args)
+    logging.basicConfig(level=log_level)
+
+    logging.info("Loading configuration file '%(filename)s'" % {
+        'filename': args.config_file})
+
+    try:
+        config = get_configuration(args.config_file)
+    except BadConfigurationError as e:
+        logging.error("Could not load specified configuration file "
+                      "'%(file)s': %(reason)s" % {
+                          'file': args.config_file,
+                          'reason': e.message})
+        logging.critical("Cannot continue without a valid configuration.")
+        return
+
+    args.func(args, config)
 
 
 if __name__ == "__main__":
